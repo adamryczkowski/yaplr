@@ -87,14 +87,89 @@ send_object<-function(thread, objectname, object, block=FALSE)
 
 }
 
-#TODO:
-#1. Zrób procedurę, która inicjuje struktury danych:
-#   a) Tworzy bigmatrix używany do komunikacji
-#   b) Tworzy nazwane mutexy: "to_manager" i "to_client"
-#   c) Zapisuje to w z góry ustalonym miejscu na dysku
+attach_mutex<-function(name, timeout=NULL)
+{
+	ans<-new('boost.mutex.descriptor')
+	ans@description<-list(shared.name=name, timeout=timeout)
+	return(synchronicity::attach.mutex(ans))
+}
+
+is_server_initialized<-function()
+{
+	m<-attach_mutex('server_initialized')
+	l<-synchronicity::lock(m,block=FALSE)
+	if (l)
+	{
+		synchronicity::unlock(m)
+		return(FALSE)
+	}
+	return(TRUE)
+}
+
+is_client_initialized<-function()
+{
+	return(!is.null(.GlobalEnv$.shared_mem))
+}
+
+
+#Function that pings the server to ensure it is running and processing the messages
+is_server_running<-function()
+{
+	if (!is_client_initialized())
+	{
+		stop("Cannot run when client is not initialized")
+	}
+	if (!is_server_initialized())
+	{
+		return(FALSE) #Not initialized server cannot be running
+	}
+
+	#Now we try to send the server message with size 0.
+	#We proceed the same as with send_message
+
+	synchronicity::lock(.GlobalEnv$.communication_to_manager,block=FALSE)
+	synchronicity::lock(.GlobalEnv$.shared_mem_guard)
+	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
+	len<-serialize(connection=NULL,length(obj))
+	if (length(len)!=sizeint)
+	{
+		stop("Inconsistent size of integer!")
+	}
+	.GlobalEnv$.shared_mem[1:sizeint,1]<-as.raw(as.integer(0))
+	synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
+
+	#Server might still be busy serving the asynchronous part of the previous message send by another client.
+	#We first need to wait until it finishes with this trick:
+	synchronicity::lock(.GlobalEnv$.communication_from_client) #We wait for the mutex without actually owning it.
+	synchronicity::unlock(.GlobalEnv$.communication_from_client) #I.e. we use this mutex more like a sempahore
+
+	flag1<-synchronicity::unlock(.GlobalEnv$.server_wakeup) #Woken server sees there is nothing in our message
+	#then sleeps again
+	if (!flag1)
+	{
+		#Server was not waiting for us!
+		synchronicity::unlock(.GlobalEnv$.communication_to_manager)
+		return(FALSE)
+	}
+	flag2<-synchronicity::lock(.GlobalEnv$.message_processing) #We wait until server does thin NO OP thing
+	if (!flag)
+	{
+		stop("Error with synchronization!")
+	}
+
+
+
+	synchronicity::lock(.GlobalEnv$.idling_manager) #We make sure that server is not idling anymore
+	synchronicity::unlock(.GlobalEnv$.idling_manager) #We use the same non-owning locking
+	synchronicity::unlock(.GlobalEnv$.communication_to_manager)
+}
 
 init_client<-function()
 {
+	if (!is_server_initialized())
+	{
+		stop("Cannot initialize client before initialization of the server.")
+	}
 	.GlobalEnv$buffer_size=4096 #option
 	obj<-readRDS('/tmp/yaplr_file.rds')
 	.GlobalEnv$.shared_mem<-bigmemory::attach.big.matrix(obj$mem)
@@ -112,7 +187,7 @@ init_client<-function()
 init_server<-function()
 {
 	.GlobalEnv$buffer_size=4096 #option
-	.GlobalEnv$.shared_mem <- bigmemory::big.matrix(nrow=buffer_size,ncol=1, type='char')
+	.GlobalEnv$.shared_mem <- bigmemory::big.matrix(nrow=buffer_size,ncol=1, type='raw')
 	.GlobalEnv$.manager_on_mutex<- synchronicity::boost.mutex('manager_present')
 	.GlobalEnv$.server_wakeup<-synchronicity::boost.mutex('server_wakeup')
 	.GlobalEnv$.idling_manager<-synchronicity::boost.mutex('idling_manager')
@@ -127,19 +202,15 @@ init_server<-function()
 
 message<-list(msg="Kuku!")
 
-#Funkcja wysyła do serwera objekt 'message'. Serwer wywoła metodę dispatch_message na tym objekcie, aby
-#dalej go procesować.
+#Function sends message 'message' to the server, and optionally waits until server finishes processing it.
 send_to_server<-function(message, block=FALSE)
 {
-	#Najpierw upewniamy się, że tylko jeden proces w danym momencie stara się wysłać sygnał managerowi
+	#First we make sure, that there is only one process trying to communicate with the server
 	synchronicity::lock(.GlobalEnv$.communication_to_manager,block=FALSE)
-	#W tej chwili tylko my zaczynamy gadać do serwera. Najpierw zawłaszczamy pamięć do rozmowy
+	#Now we can start talking to server. We do this via shared memory, which first needs to be owned:
 	synchronicity::lock(.GlobalEnv$.shared_mem_guard)
-	#W tej chwili tylko jeden proces na danej maszynie może mieć dostęp do wspólnej pamięci.
-	#
-	#Manager być może jest jeszcze zajęty procesowaniem poprzedniego zadania. Poczekamy,
-	#aż będzie gotowy, ale najpierw zrobimy naszą część: załadujemy obiekt do pamięci
-
+	#Now we are free to fill the memory with our data.
+	#Then, when the memory buffer is ready, we signal the server that we actualy want its attention.
 	obj<-serialize(connection=NULL,message,ascii=FALSE)
 	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
 	len<-serialize(connection=NULL,length(obj))
@@ -147,63 +218,73 @@ send_to_server<-function(message, block=FALSE)
 	{
 		stop("Inconsistent size of integer!")
 	}
-	.GlobalEnv$.shared_mem[1:sizeint,1]<-len
+	.GlobalEnv$.shared_mem[1:sizeint,1]<-as.raw(len)
 	if (length(obj)>.GlobalEnv$buffer_size-sizeint)
 	{
-		browser() #Należy stworzyć nowy shared file tylko na ten objekt
+		browser() #We need to create the project elsewhere
 	} else {
-		.GlobalEnv$.shared_mem[(sizeint+1):(sizeint+length(obj)),1]<-obj
+		.GlobalEnv$.shared_mem[(sizeint+1):(sizeint+length(obj)),1]<-as.raw(obj)
 	}
 	synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
 
-	#Czekamy, aż serwer zakończy procesowanie poprzedniego zadania od klienta:
-	synchronicity::lock(.GlobalEnv$.communication_from_client)
-	synchronicity::unlock(.GlobalEnv$.communication_from_client)
-	#Teraz wiemy, że manager jest gotowy, aby obsłużyć nas, bo kanał komunikacyjny jest wolny.
+	#Server might still be busy serving the asynchronous part of the previous message send by another client.
+	#We first need to wait until it finishes with this trick:
+	synchronicity::lock(.GlobalEnv$.communication_from_client) #We wait for the mutex without actually owning it.
+	synchronicity::unlock(.GlobalEnv$.communication_from_client) #I.e. we use this mutex more like a sempahore
+	#Now we are sure, that the server is waiting to start serving our request. We only need to wake it up:
+	synchronicity::unlock(.GlobalEnv$.server_wakeup) #Woken server starts to deserialize our message and then proceeds
+	#to process it.
 	#
-	#Najpierw budzimy managera
-	synchronicity::unlock(.GlobalEnv$.server_wakeup) #Obudzony serwer będzie wiedział, że
-	#czeka na niego zadanie. Od razu przejdzie do procesowania.
-	#
-	synchronicity::lock(.GlobalEnv$.idling_manager) #Czekamy, aż manager zwolni zasób "nudzę się"
-	#Teraz wiemy, że manager rzeczywiście zaczął procesować naszą wiadomość i zawłaszczył już kanał
-	#komunikacji (shared_mem_guard) oraz .message_processing. Możemy zwolnić .communication_to_manager,
-	#gdyż z punktu widzenia klienta, cała komunikacja już się skończyła.
-	synchronicity::unlock(.GlobalEnv$.idling_manager)
+	synchronicity::lock(.GlobalEnv$.idling_manager) #We make sure that server is not idling anymore - i.e. it
+	#actually started to process our message. Past this point we can assume server is processing our message.
+	synchronicity::unlock(.GlobalEnv$.idling_manager) #We use the same non-owning locking
+	# of mutex idiom as we did with 'communication_from_client'.
 
+	#We flag that our part of job has ended. All that is left to do is on the part of the server:
 	synchronicity::unlock(.GlobalEnv$.communication_to_manager)
 
 	if (block)
 	{
-		synchronicity::lock(.GlobalEnv$.message_processing) #Czekamy, aż serwer skończy procesować wiadomość
+		#If user wants us to wait for the completion of the message processing, we wait.
+		synchronicity::lock(.GlobalEnv$.message_processing) #Waiting until server finishes processing the message
 	}
 
 }
 
-#Pętla musi być wewnątrz tryCatch aby prawidłowo zwolnić mutex 'manager_present'
+#This is a main event loop for the server. Each iteration of the loop requires the client to unlock the
+#'server_wakeup' mutex.
 server_loop<-function()
 {
 	synchronicity::lock(.GlobalEnv$.server_wakeup)
-	#Czeka na nas wiadomość i jest jeden klient, który na nas czeka.
-	synchronicity::unlock(.GlobalEnv$.idling_manager) #Już się nie nudzimy
-	synchronicity::lock(.GlobalEnv$.message_processing)
-	synchronicity::lock(.GlobalEnv$.communication_from_client)
+	#Since we are woken up, we know there is a message waiting for us and there is at least one client that
+	#waits until we process this message
+	synchronicity::unlock(.GlobalEnv$.idling_manager) #End of idling phase
+	synchronicity::lock(.GlobalEnv$.message_processing) #Beginning of message processing. Waiting for this
+	#mutex allows client to wait until we process the message
+	synchronicity::lock(.GlobalEnv$.communication_from_client) #Beginning of our side of cummunication processing.
+	#This mutex is to avoid racing condition.
 
 	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
-	synchronicity::lock(.GlobalEnv$.shared_mem_guard)
+	synchronicity::lock(.GlobalEnv$.shared_mem_guard) #We start using the shared memory
 	objsize<-unserialize(connection=as.raw(.GlobalEnv$.shared_mem[1:sizeint,1]))
-	if (objsize>.GlobalEnv$buffer_size-sizeint)
+	if (objsize > 0)
 	{
-		browser()
-	} else {
-		obj<-unserialize(connection=as.raw(.GlobalEnv$.shared_mem[(sizeint+1):objsize,1]))
+		if (objsize>.GlobalEnv$buffer_size-sizeint)
+		{
+			browser()
+		} else {
+			obj<-unserialize(connection=as.raw(.GlobalEnv$.shared_mem[(sizeint+1):objsize,1]))
+		}
+		synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
+		synchronicity::unlock(.GlobalEnv$.communication_from_client)
+
+		#Now we have the obj on server's end. Now we are free to process this object:
+		cat(str(obj))
+
+	} 	else  {
+		synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
+		synchronicity::unlock(.GlobalEnv$.communication_from_client)
 	}
-	synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
-	synchronicity::unlock(.GlobalEnv$.communication_from_client)
-
-	#Mamy objekt obj. Wywołamy teraz kod zawarty w tym obiekcie, albo cokolwiek innego:
-	cat(str(obj))
-
-	synchronicity::unlock(.GlobalEnv$.message_processing)
-	synchronicity::lock(.GlobalEnv$.idling_manager) #Od tej pory się nudzimy
+	synchronicity::unlock(.GlobalEnv$.message_processing) #Signaling end of message processing
+	synchronicity::lock(.GlobalEnv$.idling_manager) #Signaling beginning of idling
 }
