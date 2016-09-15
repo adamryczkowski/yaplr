@@ -91,9 +91,18 @@ attach_mutex<-function(name, timeout=NULL)
 {
 	ans<-new('boost.mutex.descriptor')
 	ans@description<-list(shared.name=name, timeout=timeout)
-	return(synchronicity::attach.mutex(ans))
+	m<-synchronicity::attach.mutex(ans)
+	suppressWarnings({
+		if(synchronicity::lock(m, block=FALSE))
+		{
+			synchronicity::unlock(m)
+		}
+	})
+	return(m)
 }
 
+
+x <- matrix(as.raw(sample(0:255, 100)), 10, 10)
 is_server_initialized<-function()
 {
 	m<-attach_mutex('server_initialized')
@@ -112,7 +121,11 @@ is_client_initialized<-function()
 }
 
 
-#Function that pings the server to ensure it is running and processing the messages
+#Function that pings the server to ensure it is running and processing the messages.
+#It simply sets a proper NULL message to the server, sends it, wakes the server, waits until
+#it finishes processing, and then re-checks whether the server is sleeping again.
+#If it does, it means it really is running.
+#
 is_server_running<-function()
 {
 	if (!is_client_initialized())
@@ -127,7 +140,7 @@ is_server_running<-function()
 	#Now we try to send the server message with size 0.
 	#We proceed the same as with send_message
 
-	synchronicity::lock(.GlobalEnv$.communication_to_manager,block=FALSE)
+	synchronicity::lock(.GlobalEnv$.client_is_busy,block=FALSE)
 	synchronicity::lock(.GlobalEnv$.shared_mem_guard)
 	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
 	len<-serialize(connection=NULL,length(obj))
@@ -140,29 +153,55 @@ is_server_running<-function()
 
 	#Server might still be busy serving the asynchronous part of the previous message send by another client.
 	#We first need to wait until it finishes with this trick:
-	synchronicity::lock(.GlobalEnv$.communication_from_client) #We wait for the mutex without actually owning it.
-	synchronicity::unlock(.GlobalEnv$.communication_from_client) #I.e. we use this mutex more like a sempahore
+	synchronicity::lock(.GlobalEnv$.message_processing) #We wait for the mutex without actually owning it.
+	#TODO: We should put a timeout here, so in case server is dead and message_processing is already blocked,
+	#we will not deadlock.
+	synchronicity::unlock(.GlobalEnv$.message_processing) #I.e. we use this mutex more like a sempahore
+	#Now we are sure, that the server is waiting to start serving our request. We only need to wake it up:
 
 	flag1<-synchronicity::unlock(.GlobalEnv$.server_wakeup) #Woken server sees there is nothing in our message
 	#then sleeps again
 	if (!flag1)
 	{
 		#Server was not waiting for us!
-		synchronicity::unlock(.GlobalEnv$.communication_to_manager)
+		synchronicity::unlock(.GlobalEnv$.client_is_busy)
 		return(FALSE)
 	}
-	flag2<-synchronicity::lock(.GlobalEnv$.message_processing) #We wait until server does thin NO OP thing
-	if (!flag)
+	synchronicity::lock(.GlobalEnv$.message_processing) #We wait until server does this little NO OP thing
+	synchronicity::unlock(.GlobalEnv$.message_processing)
+
+	flag2<-synchronicity::lock(.GlobalEnv$.server_wakeup, block=FALSE) #We check whether the server actively locks the
+	#server_wakeup
+	if (flag2==TRUE)
 	{
-		stop("Error with synchronization!")
+		#Server did not re-block the server_wakeup flag! It means, server is not responding.
+		synchronicity::unlock(.GlobalEnv$.server_wakeup) #We undo the mutex, although it really doesn't matter...
+		return(FALSE)
+	} else
+	{
+		return(TRUE)
 	}
-
-
-
-	synchronicity::lock(.GlobalEnv$.idling_manager) #We make sure that server is not idling anymore
-	synchronicity::unlock(.GlobalEnv$.idling_manager) #We use the same non-owning locking
-	synchronicity::unlock(.GlobalEnv$.communication_to_manager)
 }
+
+# A simple loop that executes only once, when client flashes the mutex
+one_loop_server<-function()
+{
+	m1<-attach_mutex('loopS')
+	synchronicity::unlock(m1)
+
+	while(TRUE)
+	{
+		synchronicity::lock(m1)
+		cat("Obrót!")
+	}
+}
+
+one_loop_client<-function()
+{
+	m<-attach_mutex('loopS')
+	synchronicity::unlock(m)
+}
+
 
 init_client<-function()
 {
@@ -173,13 +212,11 @@ init_client<-function()
 	.GlobalEnv$buffer_size=4096 #option
 	obj<-readRDS('/tmp/yaplr_file.rds')
 	.GlobalEnv$.shared_mem<-bigmemory::attach.big.matrix(obj$mem)
-	.GlobalEnv$.manager_on_mutex<- synchronicity::boost.mutex('manager_present') #Mutex, który jest zawłaszczony
-	#przez działającą pętlę zdarzeń managera. Gdy manager zakończy swoją pętlę, to mutex jest wyzwolony.
-	.GlobalEnv$.server_wakeup<-synchronicity::boost.mutex('server_wakeup')
-	.GlobalEnv$.idling_manager<-synchronicity::boost.mutex('idling_manager')
-	.GlobalEnv$.message_processing<-synchronicity::boost.mutex('message_processing')
-	.GlobalEnv$.communication_from_client<-synchronicity::boost.mutex('communication_from_client')
-	.GlobalEnv$.communication_to_manager<-synchronicity::boost.mutex('communication_to_manager')
+	.GlobalEnv$.server_wakeup<-attach_mutex('server_wakeup')
+	.GlobalEnv$.server_initialized<-attach_mutex('server_initialized')
+	.GlobalEnv$.idling_manager<-attach_mutex('idling_manager')
+	.GlobalEnv$.message_processing<-attach_mutex('message_processing')
+	.GlobalEnv$.client_is_busy<-attach_mutex('client_is_busy')
 
 	.GlobalEnv$.shared_mem_guard<-synchronicity::boost.mutex('shared_mem_guard')
 }
@@ -188,16 +225,35 @@ init_server<-function()
 {
 	.GlobalEnv$buffer_size=4096 #option
 	.GlobalEnv$.shared_mem <- bigmemory::big.matrix(nrow=buffer_size,ncol=1, type='raw')
-	.GlobalEnv$.manager_on_mutex<- synchronicity::boost.mutex('manager_present')
-	.GlobalEnv$.server_wakeup<-synchronicity::boost.mutex('server_wakeup')
-	.GlobalEnv$.idling_manager<-synchronicity::boost.mutex('idling_manager')
-	.GlobalEnv$.message_processing<-synchronicity::boost.mutex('message_processing')
-	.GlobalEnv$.communication_from_client<-synchronicity::boost.mutex('communication_from_client')
 
+	#This mutex can be owned only by server and freed only by client.
+	.GlobalEnv$.server_wakeup<-synchronicity::boost.mutex('server_wakeup')
+
+	#This mutex is owned by server and freed by server. It is used as a cross-process flag indicating
+	#initialized shared memory
+	.GlobalEnv$.server_initialized<- synchronicity::boost.mutex('server_initialized')
+
+	#This mutex is owned by server and freed by server. It is locked when server is idle, and
+	#free when server processes a message. It is used as a cross-process flag indicating whether server
+	#is busy
+	.GlobalEnv$.idling_manager<-synchronicity::boost.mutex('idling_manager')
+
+	#This mutex is owned by server and freed by server. It is locked when server processes a message.
+	#It is used as a cross-process flag indicating whether server is busy
+	.GlobalEnv$.message_processing<-synchronicity::boost.mutex('message_processing')
+
+	#This mutex is guarding the shared memory. Both server and client can own it.
+	#It is one of the the few mutexes that perform a role a mutex was designed for ;-)
 	.GlobalEnv$.shared_mem_guard<-synchronicity::boost.mutex('shared_mem_guard')
+
+	#This mutex is owned by client. It is locked when client is in process of preparing and sending information
+	#to the server (shared memory).
+	#The mutex ensures that only one client can talk to the server at a time.
+	.GlobalEnv$.client_is_busy<-synchronicity::boost.mutex('client_is_busy')
+
+
 	saveRDS(list(mem=bigmemory::describe(.GlobalEnv$.shared_mem)), '/tmp/yaplr_file.rds')
-	synchronicity::lock(.GlobalEnv$.to_manager_mutex,block=FALSE)
-	synchronicity::lock(.GlobalEnv$.server_wakeup)
+	synchronicity::lock(.GlobalEnv$.server_wakeup, block=FALSE)
 }
 
 message<-list(msg="Kuku!")
@@ -206,7 +262,7 @@ message<-list(msg="Kuku!")
 send_to_server<-function(message, block=FALSE)
 {
 	#First we make sure, that there is only one process trying to communicate with the server
-	synchronicity::lock(.GlobalEnv$.communication_to_manager,block=FALSE)
+	synchronicity::lock(.GlobalEnv$.client_is_busy,block=FALSE)
 	#Now we can start talking to server. We do this via shared memory, which first needs to be owned:
 	synchronicity::lock(.GlobalEnv$.shared_mem_guard)
 	#Now we are free to fill the memory with our data.
@@ -229,8 +285,10 @@ send_to_server<-function(message, block=FALSE)
 
 	#Server might still be busy serving the asynchronous part of the previous message send by another client.
 	#We first need to wait until it finishes with this trick:
-	synchronicity::lock(.GlobalEnv$.communication_from_client) #We wait for the mutex without actually owning it.
-	synchronicity::unlock(.GlobalEnv$.communication_from_client) #I.e. we use this mutex more like a sempahore
+	synchronicity::lock(.GlobalEnv$.message_processing) #We wait for the mutex without actually owning it.
+	#TODO: We should put a timeout here, so in case server is dead and message_processing is already blocked,
+	#we will not deadlock.
+	synchronicity::unlock(.GlobalEnv$.message_processing) #I.e. we use this mutex more like a sempahore
 	#Now we are sure, that the server is waiting to start serving our request. We only need to wake it up:
 	synchronicity::unlock(.GlobalEnv$.server_wakeup) #Woken server starts to deserialize our message and then proceeds
 	#to process it.
@@ -238,10 +296,10 @@ send_to_server<-function(message, block=FALSE)
 	synchronicity::lock(.GlobalEnv$.idling_manager) #We make sure that server is not idling anymore - i.e. it
 	#actually started to process our message. Past this point we can assume server is processing our message.
 	synchronicity::unlock(.GlobalEnv$.idling_manager) #We use the same non-owning locking
-	# of mutex idiom as we did with 'communication_from_client'.
+	# of mutex idiom as we did with 'message_processing'.
 
 	#We flag that our part of job has ended. All that is left to do is on the part of the server:
-	synchronicity::unlock(.GlobalEnv$.communication_to_manager)
+	synchronicity::unlock(.GlobalEnv$.client_is_busy)
 
 	if (block)
 	{
@@ -255,14 +313,16 @@ send_to_server<-function(message, block=FALSE)
 #'server_wakeup' mutex.
 server_loop<-function()
 {
+	if (!is_server_initialized())
+	{
+		init_server()
+	}
 	synchronicity::lock(.GlobalEnv$.server_wakeup)
 	#Since we are woken up, we know there is a message waiting for us and there is at least one client that
 	#waits until we process this message
 	synchronicity::unlock(.GlobalEnv$.idling_manager) #End of idling phase
 	synchronicity::lock(.GlobalEnv$.message_processing) #Beginning of message processing. Waiting for this
 	#mutex allows client to wait until we process the message
-	synchronicity::lock(.GlobalEnv$.communication_from_client) #Beginning of our side of cummunication processing.
-	#This mutex is to avoid racing condition.
 
 	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
 	synchronicity::lock(.GlobalEnv$.shared_mem_guard) #We start using the shared memory
@@ -276,14 +336,12 @@ server_loop<-function()
 			obj<-unserialize(connection=as.raw(.GlobalEnv$.shared_mem[(sizeint+1):objsize,1]))
 		}
 		synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
-		synchronicity::unlock(.GlobalEnv$.communication_from_client)
 
 		#Now we have the obj on server's end. Now we are free to process this object:
 		cat(str(obj))
 
 	} 	else  {
 		synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
-		synchronicity::unlock(.GlobalEnv$.communication_from_client)
 	}
 	synchronicity::unlock(.GlobalEnv$.message_processing) #Signaling end of message processing
 	synchronicity::lock(.GlobalEnv$.idling_manager) #Signaling beginning of idling
