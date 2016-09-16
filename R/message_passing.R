@@ -101,8 +101,6 @@ attach_mutex<-function(name, timeout=NULL)
 	return(m)
 }
 
-
-x <- matrix(as.raw(sample(0:255, 100)), 10, 10)
 is_server_initialized<-function()
 {
 	m<-attach_mutex('server_initialized')
@@ -181,25 +179,6 @@ is_server_running<-function()
 	{
 		return(TRUE)
 	}
-}
-
-# A simple loop that executes only once, when client flashes the mutex
-one_loop_server<-function()
-{
-	m1<-attach_mutex('loopS')
-	synchronicity::unlock(m1)
-
-	while(TRUE)
-	{
-		synchronicity::lock(m1)
-		cat("Obrót!")
-	}
-}
-
-one_loop_client<-function()
-{
-	m<-attach_mutex('loopS')
-	synchronicity::unlock(m)
 }
 
 
