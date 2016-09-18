@@ -17,6 +17,9 @@ init_client<-function()
 
 	.GlobalEnv$.shared_mem_guard<-synchronicity::boost.mutex('shared_mem_guard')
 
+	#Storage for pointers (big.matrices) to stored objects
+	.GlobalEnv$.object_starage<-list()
+
 	return(invisible(NULL))
 }
 

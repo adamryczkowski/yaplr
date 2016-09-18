@@ -18,27 +18,30 @@ server_loop<-function()
 		synchronicity::lock(.GlobalEnv$.message_processing) #Beginning of message processing. Waiting for this
 		#mutex allows client to wait until we process the message
 
-		sizeint<-length(serialize(connection=NULL,as.integer(-10)))
-		synchronicity::lock(.GlobalEnv$.shared_mem_guard) #We start using the shared memory
-		objsize<-unserialize(connection=.GlobalEnv$.shared_mem[1:sizeint,1])
-		if (objsize > 0)
+		obj<-get_object_from_big_matrix(.GlobalEnv$.shared_mem)
+
+		if (!is.null(obj))
 		{
-			if (objsize>.GlobalEnv$buffer_size-sizeint)
+			ans<-call_function(obj)
+			if (!is.null(ans))
 			{
-				browser()
-			} else {
-				obj<-unserialize(connection=.GlobalEnv$.shared_mem[(sizeint+1):(objsize+sizeint),1])
+				put_object_in_big_matrix(bm = .GlobalEnv$.shared_mem, obj = ans)
+			} else
+			{
+				put_object_in_big_matrix(bm = .GlobalEnv$.shared_mem, obj = NULL)
 			}
-			synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
-
-			#Now we have the obj on server's end. Now we are free to process this object:
-			cat(str(obj))
-
-		} 	else  {
-			synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
 		}
+
+		synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
+
+
 		synchronicity::unlock(.GlobalEnv$.message_processing) #Signaling end of message processing
 		synchronicity::lock(.GlobalEnv$.idling_manager, block=FALSE) #Signaling beginning of idling
 		cat('Server has received a message!\n')
 	}
+}
+
+call_function<-function(obj)
+{
+	do.call(eval(parse(text = paste0('yaplr:::remotecall_',obj$method))),args=obj$args, envir=.GlobalEnv)
 }

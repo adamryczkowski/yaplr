@@ -14,5 +14,6 @@ LazyData: true
 Imports:
     synchronicity,
     svSocket,
-    bigmemory
+    bigmemory,
+    R6
 Suggests: testthat

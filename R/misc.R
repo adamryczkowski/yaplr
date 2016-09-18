@@ -1,3 +1,21 @@
+RemoteObject <- R6::R6Class("RemoteObject",
+									public = list(
+										getobject = function() {
+											if (is.null(private$smallobj))
+											{
+												return(unserialize(connection=extra_storage[,1]))
+											} else
+											{
+												return(private$smallobj)
+											}
+										}
+										),
+									private = list(
+										smallobj = NULL,
+										extra_storage = NULL
+									)
+)
+
 attach_mutex<-function(name, timeout=NULL)
 {
 	library(synchronicity)
@@ -51,13 +69,7 @@ is_server_running<-function()
 
 	synchronicity::lock(.GlobalEnv$.client_is_busy,block=FALSE)
 	synchronicity::lock(.GlobalEnv$.shared_mem_guard)
-	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
-	len<-serialize(connection=NULL,as.integer(0))
-	if (length(len)!=sizeint)
-	{
-		stop("Inconsistent size of integer!")
-	}
-	.GlobalEnv$.shared_mem[1:sizeint,1]<-serialize(connection=NULL, as.integer(0))
+	put_object_in_big_matrix(bm=.GlobalEnv$.shared_mem, obj=NULL)
 	synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
 
 	#Server might still be busy serving the asynchronous part of the previous message send by another client.
@@ -102,5 +114,55 @@ reset_mutexes<-function()
 
 	synchronicity::lock(.GlobalEnv$.message_processing, block=FALSE)
 	synchronicity::unlock(.GlobalEnv$.message_processing)
+
+}
+
+#' Returns NULL or big.matrix that stores the actual object in case the object is too big to fit bm.
+#' Be careful to assign the returned value, otherwise you will get segment violation if gc frees the
+#' big.matrix containing the object before it is read.
+put_object_in_big_matrix<-function(bm, obj)
+{
+	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
+	if (!is.null(obj))
+	{
+		rawobj<-serialize(connection=NULL,obj,ascii=FALSE)
+	} else{
+		rawobj<-raw(0)
+	}
+	len<-serialize(connection=NULL,length(rawobj))
+	if (length(len)!=sizeint)
+	{
+		stop("Inconsistent size of integer!")
+	}
+	bm[1:sizeint,1]<-as.raw(len)
+	if (length(obj)>nrow(bm)-sizeint)
+	{
+		extrabm<-bigmemory::big.matrix(nrow=length(obj),ncol=1, type='raw')
+		extrabm[,1]<-rawobj
+		bm[(sizeint+1):(sizeint+length(obj)),1]<-serialize(connection=NULL,bigmemory::describe(extrabm))
+		ans<-extrabm
+	} else {
+		bm<-rawobj
+		ans<-NULL
+	}
+}
+
+#' Function returns object
+get_object_from_big_matrix<-function(bm)
+{
+	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
+	objsize<-unserialize(connection=bm[1:sizeint,1])
+	if (objsize > 0)
+	{
+		ans<-unserialize(connection=bm[(sizeint+1):(objsize+sizeint),1])
+		if (objsize>nrow(bm)-sizeint)
+		{
+			extra_bm<-bigmemory::attach.big.matrix(ans)
+			ans<-unserialize(connection=extra_bm)
+		}
+		return(ans)
+	} 	else  {
+		return(NULL)
+	}
 
 }
