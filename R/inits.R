@@ -16,6 +16,7 @@ init_client<-function()
 	.GlobalEnv$.client_is_busy<-attach_mutex('client_is_busy')
 
 	.GlobalEnv$.shared_mem_guard<-synchronicity::boost.mutex('shared_mem_guard')
+
 	return(invisible(NULL))
 }
 
@@ -53,6 +54,7 @@ init_server<-function()
 
 	saveRDS(list(mem=bigmemory::describe(.GlobalEnv$.shared_mem)), '/tmp/yaplr_file.rds')
 	synchronicity::lock(.GlobalEnv$.server_wakeup, block=FALSE)
+	synchronicity::lock(.GlobalEnv$.server_initialized, block=FALSE)
 	return(invisible(NULL))
 }
 

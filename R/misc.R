@@ -1,5 +1,6 @@
 attach_mutex<-function(name, timeout=NULL)
 {
+	library(synchronicity)
 	ans<-new('boost.mutex.descriptor')
 	ans@description<-list(shared.name=name, timeout=timeout)
 	m<-synchronicity::attach.mutex(ans)
@@ -51,12 +52,12 @@ is_server_running<-function()
 	synchronicity::lock(.GlobalEnv$.client_is_busy,block=FALSE)
 	synchronicity::lock(.GlobalEnv$.shared_mem_guard)
 	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
-	len<-serialize(connection=NULL,length(obj))
+	len<-serialize(connection=NULL,as.integer(0))
 	if (length(len)!=sizeint)
 	{
 		stop("Inconsistent size of integer!")
 	}
-	.GlobalEnv$.shared_mem[1:sizeint,1]<-as.raw(as.integer(0))
+	.GlobalEnv$.shared_mem[1:sizeint,1]<-serialize(connection=NULL, as.integer(0))
 	synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
 
 	#Server might still be busy serving the asynchronous part of the previous message send by another client.
@@ -67,7 +68,7 @@ is_server_running<-function()
 	synchronicity::unlock(.GlobalEnv$.message_processing) #I.e. we use this mutex more like a sempahore
 	#Now we are sure, that the server is waiting to start serving our request. We only need to wake it up:
 
-	flag1<-synchronicity::unlock(.GlobalEnv$.server_wakeup) #Woken server sees there is nothing in our message
+	suppressWarnings(flag1<-synchronicity::unlock(.GlobalEnv$.server_wakeup)) #Woken server sees there is nothing in our message
 	#then sleeps again
 	if (!flag1)
 	{
@@ -91,3 +92,15 @@ is_server_running<-function()
 	}
 }
 
+#' @export
+reset_mutexes<-function()
+{
+	init_client()
+
+	synchronicity::lock(.GlobalEnv$.shared_mem_guard, block=FALSE)
+	synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
+
+	synchronicity::lock(.GlobalEnv$.message_processing, block=FALSE)
+	synchronicity::unlock(.GlobalEnv$.message_processing)
+
+}

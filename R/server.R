@@ -1,45 +1,44 @@
-
-
-
-
-init_server<-function()
-{
-	.GlobalEnv$buffer_size=4096 #option
-	.GlobalEnv$.shared_mem <- bigmemory::big.matrix(nrow=buffer_size,ncol=1, type='char')
-	.GlobalEnv$.manager_on_mutex<- synchronicity::boost.mutex('manager_present')
-	.GlobalEnv$.server_wakeup<-synchronicity::boost.mutex('server_wakeup')
-	.GlobalEnv$.idling_manager<-synchronicity::boost.mutex('idling_manager')
-	.GlobalEnv$.message_processing<-synchronicity::boost.mutex('message_processing')
-	.GlobalEnv$.communication_from_client<-synchronicity::boost.mutex('communication_from_client')
-	
-	.GlobalEnv$.shared_mem_guard<-synchronicity::boost.mutex('shared_mem_guard')
-	saveRDS(list(mem=bigmemory::describe(.GlobalEnv$.shared_mem)), '/tmp/yaplr_file.rds')
-	synchronicity::lock(.GlobalEnv$.server_wakeup, block=FALSE)
-}
-
+#This is a main event loop for the server. Each iteration of the loop requires the client to unlock the
+#'server_wakeup' mutex.
+#' @export
 server_loop<-function()
 {
-	synchronicity::lock(.GlobalEnv$.server_wakeup,block=FALSE)
-	#Czeka na nas wiadomość i jest jeden klient, który na nas czeka.
-	synchronicity::unlock(.GlobalEnv$.idling_manager) #Już się nie nudzimy
-	synchronicity::lock(.GlobalEnv$.message_processing)
-	synchronicity::lock(.GlobalEnv$.communication_from_client)
-	
-	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
-	synchronicity::lock(.GlobalEnv$.shared_mem_guard)
-	objsize<-unserialize(connection=as.raw(.GlobalEnv$.shared_mem[1:sizeint,1]))
-	if (objsize>.GlobalEnv$buffer_size-sizeint)
+	if (!is_server_initialized())
 	{
-		browser()
-	} else {
-		obj<-unserialize(connection=as.raw(.GlobalEnv$.shared_mem[(sizeint+1):(sizeint+objsize),1]))
+		init_server()
 	}
-	synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
-	synchronicity::unlock(.GlobalEnv$.communication_from_client)
-	
-	#Mamy objekt obj. Wywołamy teraz kod zawarty w tym obiekcie, albo cokolwiek innego:
-	cat(str(obj))
-	
-	synchronicity::unlock(.GlobalEnv$.message_processing)
-	synchronicity::lock(.GlobalEnv$.idling_manager) #Od tej pory się nudzimy
+	exit_flag=FALSE
+	while(!exit_flag)
+	{
+
+		synchronicity::lock(.GlobalEnv$.server_wakeup)
+		#Since we are woken up, we know there is a message waiting for us and there is at least one client that
+		#waits until we process this message
+		synchronicity::unlock(.GlobalEnv$.idling_manager) #End of idling phase
+		synchronicity::lock(.GlobalEnv$.message_processing) #Beginning of message processing. Waiting for this
+		#mutex allows client to wait until we process the message
+
+		sizeint<-length(serialize(connection=NULL,as.integer(-10)))
+		synchronicity::lock(.GlobalEnv$.shared_mem_guard) #We start using the shared memory
+		objsize<-unserialize(connection=as.raw(.GlobalEnv$.shared_mem[1:sizeint,1]))
+		if (objsize > 0)
+		{
+			if (objsize>.GlobalEnv$buffer_size-sizeint)
+			{
+				browser()
+			} else {
+				obj<-unserialize(connection=as.raw(.GlobalEnv$.shared_mem[(sizeint+1):objsize,1]))
+			}
+			synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
+
+			#Now we have the obj on server's end. Now we are free to process this object:
+			cat(str(obj))
+
+		} 	else  {
+			synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
+		}
+		synchronicity::unlock(.GlobalEnv$.message_processing) #Signaling end of message processing
+		synchronicity::lock(.GlobalEnv$.idling_manager, block=FALSE) #Signaling beginning of idling
+		cat('Server has received a message!\n')
+	}
 }
