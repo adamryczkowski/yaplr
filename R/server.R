@@ -20,14 +20,14 @@ server_loop<-function()
 
 		sizeint<-length(serialize(connection=NULL,as.integer(-10)))
 		synchronicity::lock(.GlobalEnv$.shared_mem_guard) #We start using the shared memory
-		objsize<-unserialize(connection=as.raw(.GlobalEnv$.shared_mem[1:sizeint,1]))
+		objsize<-unserialize(connection=.GlobalEnv$.shared_mem[1:sizeint,1])
 		if (objsize > 0)
 		{
 			if (objsize>.GlobalEnv$buffer_size-sizeint)
 			{
 				browser()
 			} else {
-				obj<-unserialize(connection=as.raw(.GlobalEnv$.shared_mem[(sizeint+1):objsize,1]))
+				obj<-unserialize(connection=.GlobalEnv$.shared_mem[(sizeint+1):(objsize+sizeint),1])
 			}
 			synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
 
