@@ -22,13 +22,19 @@ server_loop<-function()
 
 		if (!is.null(obj))
 		{
-			ans<-call_function(obj)
-			if (!is.null(ans))
+			if (obj$method == 'quit')
 			{
-				hold_reference<-put_object_in_big_matrix(bm = .GlobalEnv$.shared_mem, obj = ans)
+				exit_flag=TRUE
 			} else
 			{
-				hold_reference<-put_object_in_big_matrix(bm = .GlobalEnv$.shared_mem, obj = NULL)
+				ans<-call_function(obj)
+				if (!is.null(ans))
+				{
+					hold_reference<-put_object_in_big_matrix(bm = .GlobalEnv$.shared_mem, obj = ans)
+				} else
+				{
+					hold_reference<-put_object_in_big_matrix(bm = .GlobalEnv$.shared_mem, obj = NULL)
+				}
 			}
 		}
 

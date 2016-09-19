@@ -1,91 +1,3 @@
-#' How a thread is controlled?
-#' --------------------------
-#'
-#' When a thread is launched it leaves a global object is a hub of communications with it. The object lives in
-#' a global thread of a calling machine and can be accessed remotely.
-#'
-#' It contains a list of all objects sent from the thread and allows sending information in.
-#'
-#'
-#'
-#'
-#'
-#' How my mutexes work?
-#' --------------------
-#'
-#' All mutexes are named, so they can be shared by name across the machine.
-#' There are 2 kinds of mutexes: local ones (shared across the machine) and global ones (shared globally across the cluster)
-
-#' When a working thread locks a global mutex, what does happen behind the scenes?
-#' 1. Calls a function GetGlobalMutex(name).
-#' 2. The functions tries to acquire token of communication (another mutex), and when it has one, it pushes request for a
-#'    global mutex with the given name. The request gets shared by filling a shared object used as
-#'    a buffer for communication
-#' 3. The machine manager thread (which is a parent of a spawned )
-
-#' Invariants:
-#'
-#' * Never touches the filesystem. No temporary files. No need to share a folder across a computer.
-#'
-#' * Don't mess with the forks. User can use forks however they want, but for the purpose of the package, use only
-#'   bigmemory::matrix for communication and separate, dedicated process for execution
-#'   control (separate for each machine in the cluster)
-NULL
-
-
-#' Initializes cluster
-server_init_cluster <- function() {
-
-}
-
-#' Spawnes expr as a fork. It returns an object of class 'execution_thread', which allows for
-#' control the process.
-server_spawn_fork<-function(expr, start=TRUE)
-{
-
-}
-
-#' Spawns a thread in a host 'host'.
-server_spawn_thread<-function(host,expr,start=TRUE, exportlist=list())
-{
-
-}
-
-#' Adds server to socket pool. Also initializes parallel managment task on the host
-server_add_machine_to_cluster_by_svsocket<-function(hostname, port)
-{
-
-}
-
-#' Sends object 'msg' to server. This object will be available to read by the server.
-#' Function is non-blocking
-client_send_message<-function(msg)
-{
-
-}
-
-#' Gets the message from server. If block=TRUE (default) it waits until message is available.
-#' If block=FALSE and there is no message, it returns NULL
-client_receive_message<-function(block=TRUE)
-{
-
-}
-
-#' Creates mutex, usualy used to enforce serialize usage of a critical resource.
-#' If distributed=TRUE, than this mutex will be available across all computers in cluster.
-create_mutex<-function(name=NULL, distributed=FALSE)
-{
-
-}
-
-#' Sends object 'object' into thread 'thread' under the name 'objectname'. It is fast,
-#' if the thread is on the same machine.
-#' If block=FALSE and the thread is on the remote host, it only initializes sending process and returns
-#' object 'sending_progress' that allows for monitoring the process, and waiting when it has finished.
-send_object<-function(thread, objectname, object, block=FALSE)
-{
-
-}
 
 #Function sends message 'message' to the server, and optionally waits until server finishes processing it.
 #block implicitely means that we are interested in return value.
@@ -113,11 +25,13 @@ send_to_server<-function(method, args, block=FALSE)
 	synchronicity::unlock(.GlobalEnv$.server_wakeup) #Woken server starts to deserialize our message and then proceeds
 	#to process it.
 	#
-	synchronicity::lock(.GlobalEnv$.message_processing) #We make sure that server is not idling anymore - i.e. it
+	synchronicity::lock(.GlobalEnv$.idling_manager) #We make sure that server is not idling anymore - i.e. it
 	#actually started to process our message. Past this point we can assume server is processing our message.
-	synchronicity::unlock(.GlobalEnv$.message_processing) #We use the same non-owning locking
+	synchronicity::unlock(.GlobalEnv$.idling_manager) #We use the same non-owning locking
 	# of mutex idiom as we did with 'message_processing'.
 
+	#We flag that our part of job has ended. All that is left to do is on the part of the server:
+	synchronicity::unlock(.GlobalEnv$.client_is_busy)
 	ret<-NULL
 	if (block || !is.null(hold_reference))
 	{
@@ -133,17 +47,8 @@ send_to_server<-function(method, args, block=FALSE)
 		{
 			synchronicity::lock(.GlobalEnv$.shared_mem_guard)
 			ret<-get_object_from_big_matrix(.GlobalEnv$.shared_mem)
-
 			synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
-
-			#We flag that our part of job has ended. All that is left to do is on the part of the server:
-			synchronicity::unlock(.GlobalEnv$.client_is_busy)
-		} else
-		{
-			synchronicity::unlock(.GlobalEnv$.client_is_busy)
 		}
-	} else {
-		synchronicity::unlock(.GlobalEnv$.client_is_busy)
 	}
 	return(ret)
 }

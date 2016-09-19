@@ -4,10 +4,11 @@ Title: Yet another parallel library for R
 Version: 0.1.0
 Author: Adam Ryczkowski
 Maintainer: <adam@statystyka.net>
-Description: Merges functionality of svSocket and parallel with synchronicity packages and gives convenient API
-    for spawning new threads by either forking or planting them on remote machine via svSocket.
-    Calcluations spawned via svSocket can be easily debugged (even executed step-by-step) if remote svSocket is
-    ran on RStudio.
+Description: Merges functionality of svSocket and parallel with synchronicity
+    packages and gives convenient API for spawning new threads by either forking or
+    planting them on remote machine via svSocket. Calcluations spawned via svSocket
+    can be easily debugged (even executed step-by-step) if remote svSocket is ran on
+    RStudio.
 License: LGPL-3
 Encoding: UTF-8
 LazyData: true
@@ -16,4 +17,6 @@ Imports:
     svSocket,
     bigmemory,
     R6
-Suggests: testthat
+Suggests:
+    testthat
+RoxygenNote: 5.0.1
