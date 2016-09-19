@@ -2,9 +2,9 @@
 #'
 #' obj_storage is a big.matrix with serialized object.
 #' tag is a name under which an object will be accessible
-remotecall_store_object<-function(obj_storage, tag)
+remotecall_store_object<-function(obj, tag)
 {
-	.GlobalEnv$.object_starage[tag]<-obj_storage
+	assign(x=tag, value=obj, envir=.GlobalEnv$.object_starage)
 	return(NULL)
 }
 
@@ -18,5 +18,8 @@ remotecall_retrieve_object<-function(tag)
 
 remotecall_free_object<-function(tag)
 {
-
+	if(exists(tag, envir = .GlobalEnv$.object_starage))
+	{
+		rm(list = tag, envir = .GlobalEnv$.object_starage)
+	}
 }

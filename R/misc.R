@@ -135,14 +135,18 @@ put_object_in_big_matrix<-function(bm, obj)
 		stop("Inconsistent size of integer!")
 	}
 	bm[1:sizeint,1]<-as.raw(len)
-	if (length(obj)>nrow(bm)-sizeint)
+	if (length(rawobj)>nrow(bm)-sizeint)
 	{
 		extrabm<-bigmemory::big.matrix(nrow=length(obj),ncol=1, type='raw')
 		extrabm[,1]<-rawobj
-		bm[(sizeint+1):(sizeint+length(obj)),1]<-serialize(connection=NULL,bigmemory::describe(extrabm))
+		rawbm<-serialize(connection=NULL,bigmemory::describe(extrabm))
+		bm[(sizeint+1):(sizeint+length(rawbm)),1]<-rawbm
 		ans<-extrabm
 	} else {
-		bm<-rawobj
+		if (length(rawobj)>0)
+		{
+			bm[(sizeint+1):(sizeint+length(rawobj)),1]<-rawobj
+		}
 		ans<-NULL
 	}
 }

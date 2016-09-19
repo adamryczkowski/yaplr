@@ -25,15 +25,21 @@ server_loop<-function()
 			ans<-call_function(obj)
 			if (!is.null(ans))
 			{
-				put_object_in_big_matrix(bm = .GlobalEnv$.shared_mem, obj = ans)
+				hold_reference<-put_object_in_big_matrix(bm = .GlobalEnv$.shared_mem, obj = ans)
 			} else
 			{
-				put_object_in_big_matrix(bm = .GlobalEnv$.shared_mem, obj = NULL)
+				hold_reference<-put_object_in_big_matrix(bm = .GlobalEnv$.shared_mem, obj = NULL)
 			}
 		}
 
 		synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
 
+		if (!is.null(hold_reference))
+		{
+			#Waiting until client finishes processing the request
+			synchronicity::lock(.GlobalEnv$.client_is_busy)
+			synchronicity::unlock(.GlobalEnv$.client_is_busy)
+		}
 
 		synchronicity::unlock(.GlobalEnv$.message_processing) #Signaling end of message processing
 		synchronicity::lock(.GlobalEnv$.idling_manager, block=FALSE) #Signaling beginning of idling

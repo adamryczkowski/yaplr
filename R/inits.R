@@ -18,7 +18,6 @@ init_client<-function()
 	.GlobalEnv$.shared_mem_guard<-synchronicity::boost.mutex('shared_mem_guard')
 
 	#Storage for pointers (big.matrices) to stored objects
-	.GlobalEnv$.object_starage<-list()
 
 	return(invisible(NULL))
 }
@@ -54,10 +53,15 @@ init_server<-function()
 	#The mutex ensures that only one client can talk to the server at a time.
 	.GlobalEnv$.client_is_busy<-synchronicity::boost.mutex('client_is_busy')
 
+	.GlobalEnv$.object_starage<-new.env(parent=emptyenv(), hash=TRUE)
 
 	saveRDS(list(mem=bigmemory::describe(.GlobalEnv$.shared_mem)), '/tmp/yaplr_file.rds')
 	synchronicity::lock(.GlobalEnv$.server_wakeup, block=FALSE)
 	synchronicity::lock(.GlobalEnv$.server_initialized, block=FALSE)
+
+	suppressWarnings({synchronicity::lock(.GlobalEnv$.idling_manager, block=FALSE);
+									synchronicity::unlock(.GlobalEnv$.idling_manager)})
+
 	return(invisible(NULL))
 }
 

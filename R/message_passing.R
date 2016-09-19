@@ -113,13 +113,11 @@ send_to_server<-function(method, args, block=FALSE)
 	synchronicity::unlock(.GlobalEnv$.server_wakeup) #Woken server starts to deserialize our message and then proceeds
 	#to process it.
 	#
-	synchronicity::lock(.GlobalEnv$.idling_manager) #We make sure that server is not idling anymore - i.e. it
+	synchronicity::lock(.GlobalEnv$.message_processing) #We make sure that server is not idling anymore - i.e. it
 	#actually started to process our message. Past this point we can assume server is processing our message.
-	synchronicity::unlock(.GlobalEnv$.idling_manager) #We use the same non-owning locking
+	synchronicity::unlock(.GlobalEnv$.message_processing) #We use the same non-owning locking
 	# of mutex idiom as we did with 'message_processing'.
 
-	#We flag that our part of job has ended. All that is left to do is on the part of the server:
-	synchronicity::unlock(.GlobalEnv$.client_is_busy)
 	ret<-NULL
 	if (block || !is.null(hold_reference))
 	{
@@ -135,8 +133,17 @@ send_to_server<-function(method, args, block=FALSE)
 		{
 			synchronicity::lock(.GlobalEnv$.shared_mem_guard)
 			ret<-get_object_from_big_matrix(.GlobalEnv$.shared_mem)
+
 			synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
+
+			#We flag that our part of job has ended. All that is left to do is on the part of the server:
+			synchronicity::unlock(.GlobalEnv$.client_is_busy)
+		} else
+		{
+			synchronicity::unlock(.GlobalEnv$.client_is_busy)
 		}
+	} else {
+		synchronicity::unlock(.GlobalEnv$.client_is_busy)
 	}
 	return(ret)
 }
