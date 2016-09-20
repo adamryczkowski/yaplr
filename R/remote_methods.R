@@ -23,3 +23,8 @@ remotecall_free_object<-function(tag)
 		rm(list = tag, envir = .GlobalEnv$.object_starage)
 	}
 }
+
+remotecall_ping<-function()
+{
+	return('pong')
+}

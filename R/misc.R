@@ -1,20 +1,3 @@
-RemoteObject <- R6::R6Class("RemoteObject",
-									public = list(
-										getobject = function() {
-											if (is.null(private$smallobj))
-											{
-												return(unserialize(connection=extra_storage[,1]))
-											} else
-											{
-												return(private$smallobj)
-											}
-										}
-										),
-									private = list(
-										smallobj = NULL,
-										extra_storage = NULL
-									)
-)
 
 attach_mutex<-function(name, timeout=NULL)
 {
@@ -31,6 +14,7 @@ attach_mutex<-function(name, timeout=NULL)
 	return(m)
 }
 
+#' @export
 is_server_initialized<-function()
 {
 	m<-attach_mutex('server_initialized')
@@ -48,76 +32,57 @@ is_client_initialized<-function()
 	return(!is.null(.GlobalEnv$.shared_mem))
 }
 
-#Function that pings the server to ensure it is running and processing the messages.
-#It simply sets a proper NULL message to the server, sends it, wakes the server, waits until
-#it finishes processing, and then re-checks whether the server is sleeping again.
-#If it does, it means it really is running.
-#
+#' @title Tests if server is processing messages
+#' @description  Function that pings the server to ensure it is running and processing the messages.
+#' It simply sets a proper NULL message to the server, sends it, wakes the server, waits until
+#' it finishes processing, and then re-checks whether the server is sleeping again.
+#' If it does, it means it really is running.
+#' @export
 is_server_running<-function()
 {
-	if (!is_client_initialized())
-	{
-		stop("Cannot run when client is not initialized")
-	}
 	if (!is_server_initialized())
 	{
 		return(FALSE) #Not initialized server cannot be running
 	}
 
-	#Now we try to send the server message with size 0.
-	#We proceed the same as with send_message
+	#Now we try to check whether the server waits for the messages
 
-	synchronicity::lock(.GlobalEnv$.client_is_busy,block=FALSE)
-	synchronicity::lock(.GlobalEnv$.shared_mem_guard)
-	put_object_in_big_matrix(bm=.GlobalEnv$.shared_mem, obj=NULL)
-	synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
+	#First we wait until the server is not busy
 
-	#Server might still be busy serving the asynchronous part of the previous message send by another client.
-	#We first need to wait until it finishes with this trick:
-	synchronicity::lock(.GlobalEnv$.message_processing) #We wait for the mutex without actually owning it.
-	#TODO: We should put a timeout here, so in case server is dead and message_processing is already blocked,
-	#we will not deadlock.
-	synchronicity::unlock(.GlobalEnv$.message_processing) #I.e. we use this mutex more like a sempahore
-	#Now we are sure, that the server is waiting to start serving our request. We only need to wake it up:
-
-	suppressWarnings(flag1<-synchronicity::unlock(.GlobalEnv$.server_wakeup)) #Woken server sees there is nothing in our message
-	#then sleeps again
-	if (!flag1)
+	if (exists(x = '.message_processing', envir = .GlobalEnv))
 	{
-		#Server was not waiting for us!
-		synchronicity::unlock(.GlobalEnv$.client_is_busy)
-		return(FALSE)
+		mutex_message_processing<-.GlobalEnv$.message_processing
+	} else {
+		mutex_message_processing<-attach_mutex('message_processing')
 	}
-	synchronicity::lock(.GlobalEnv$.message_processing) #We wait until server does this little NO OP thing
-	synchronicity::unlock(.GlobalEnv$.message_processing)
 
-	flag2<-synchronicity::lock(.GlobalEnv$.server_wakeup, block=FALSE) #We check whether the server actively locks the
-	#server_wakeup
-	if (flag2==TRUE)
+	if (exists(x='.idling_server', envir=.GlobalEnv))
 	{
-		#Server did not re-block the server_wakeup flag! It means, server is not responding.
-		synchronicity::unlock(.GlobalEnv$.server_wakeup) #We undo the mutex, although it really doesn't matter...
-		return(FALSE)
-	} else
-	{
-		return(TRUE)
+		mutex_idling_server<-.GlobalEnv$.idling_server
+	} else {
+		mutex_idling_server<-attach_mutex('idling_server')
 	}
+
+	synchronicity::lock(mutex_message_processing) #We wait for the mutex without actually owning it.
+	#Now we check idling state
+
+	suppressWarnings(not_idling<-synchronicity::lock(mutex_idling_server, block=FALSE))
+	if (not_idling)
+	{
+		synchronicity::unlock(mutex_idling_server)
+		is_up<-FALSE
+	} else {
+		is_up<-TRUE
+	}
+
+	synchronicity::unlock(mutex_message_processing) #Stop blocking the server
+	return(is_up)
 }
 
-#' @export
-reset_mutexes<-function()
-{
-	init_client()
 
-	synchronicity::lock(.GlobalEnv$.shared_mem_guard, block=FALSE)
-	synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
-
-	synchronicity::lock(.GlobalEnv$.message_processing, block=FALSE)
-	synchronicity::unlock(.GlobalEnv$.message_processing)
-
-}
-
-#' Returns NULL or big.matrix that stores the actual object in case the object is too big to fit bm.
+#' @title Puts object in a shared big.matrix
+#'
+#' @description Returns NULL or big.matrix that stores the actual object in case the object is too big to fit bm.
 #' Be careful to assign the returned value, otherwise you will get segment violation if gc frees the
 #' big.matrix containing the object before it is read.
 put_object_in_big_matrix<-function(bm, obj)
@@ -163,6 +128,8 @@ get_object_from_big_matrix<-function(bm)
 		{
 			extra_bm<-bigmemory::attach.big.matrix(ans)
 			ans<-unserialize(connection=extra_bm)
+			rm(extra_bm)
+			gc()
 		}
 		return(ans)
 	} 	else  {

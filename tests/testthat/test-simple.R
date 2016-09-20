@@ -1,35 +1,47 @@
 library(parallel)
 library(yaplr)
+library(testthat)
 
 context("Simple localhost communication")
+suppressWarnings(shutdown_client())
+shutdown_server()
 
-test_that("Server startup and teardown", {
-	shutdown_server()
-	init_server()
-	shutdown_server()
-})
+test_that("Test is_server_running", {
+	fn<-function()
+	{
+		library(yaplr)
+		init_server()
+		server_loop()
+		shutdown_server()
+	}
+	con<-mcparallel(fn())
+	Sys.sleep(0.2)
 
-test_that("Client startup and teardown", {
-	client_shutdown()
 	init_client()
-	client_shutdown()
+#	debugonce(send_to_server)
+	expect_equal(send_to_server(method='ping', args = list()),'pong')
+
+	expect_null(send_to_server(method = 'quit',args = list()))
+	shutdown_client()
+	mccollect(con)
 })
 
 test_that("Test ping-pong, server side", {
 	clientfn<-function()
 	{
-		Sys.sleep(0.1)
+		Sys.sleep(1)
 		library(yaplr)
 		init_client()
-		reset_mutexes()
+		send_to_server(method='ping', args = list())
 		send_to_server('quit',NULL)
 		shutdown_client()
 	}
-
-	init_server()
-
+	shutdown_server()
+	reset_communication()
 	con<-mcparallel(clientfn())
+#	init_server(force=TRUE)
 
+#	debugonce(server_loop)
 	server_loop()
 
 	mccollect(con)

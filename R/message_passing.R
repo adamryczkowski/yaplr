@@ -1,7 +1,8 @@
 
-#Function sends message 'message' to the server, and optionally waits until server finishes processing it.
-#block implicitely means that we are interested in return value.
-send_to_server<-function(method, args, block=FALSE)
+#' Function sends message 'message' to the server, and optionally waits until server finishes processing it.
+#' block implicitely means that we are interested in return value.
+#' @export
+send_to_server<-function(method, args)
 {
 	#First we make sure, that there is only one process trying to communicate with the server
 	synchronicity::lock(.GlobalEnv$.client_is_busy,block=FALSE)
@@ -11,7 +12,7 @@ send_to_server<-function(method, args, block=FALSE)
 	#Then, when the memory buffer is ready, we signal the server that we actualy want its attention.
 	obj<-list(method=method, args=args)
 	#hold_reference is kept to prevent the temporary shared memory that might be created by the
-	#'put_object_in_big_matrix' from being destroyed by the gc
+	# 'put_object_in_big_matrix' from being destroyed by the gc
 	hold_reference<-put_object_in_big_matrix(bm=.GlobalEnv$.shared_mem, obj=obj)
 	synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
 
@@ -22,34 +23,47 @@ send_to_server<-function(method, args, block=FALSE)
 	#we will not deadlock.
 	synchronicity::unlock(.GlobalEnv$.message_processing) #I.e. we use this mutex more like a sempahore
 	#Now we are sure, that the server is waiting to start serving our request. We only need to wake it up:
+
+	suppressWarnings(not_idling<-synchronicity::lock(.GlobalEnv$.idling_server, block=FALSE))
+	if (not_idling)
+	{
+		synchronicity::unlock(.GlobalEnv$.idling_server)
+		stop("Server doesn't appear to be running the message loop.")
+	}
+
+	suppressMessages(synchronicity::lock(.GlobalEnv$.server_wakeup,block=FALSE))
 	synchronicity::unlock(.GlobalEnv$.server_wakeup) #Woken server starts to deserialize our message and then proceeds
 	#to process it.
-	#
-	synchronicity::lock(.GlobalEnv$.idling_manager) #We make sure that server is not idling anymore - i.e. it
-	#actually started to process our message. Past this point we can assume server is processing our message.
-	synchronicity::unlock(.GlobalEnv$.idling_manager) #We use the same non-owning locking
-	# of mutex idiom as we did with 'message_processing'.
 
-	#We flag that our part of job has ended. All that is left to do is on the part of the server:
-	synchronicity::unlock(.GlobalEnv$.client_is_busy)
+	synchronicity::lock(.GlobalEnv$.idling_server) #We wait until the server stops being idle, i.e.
+	#until he locks the 'message_processing' mutex.
+	synchronicity::unlock(.GlobalEnv$.idling_server)
+
 	ret<-NULL
-	if (block || !is.null(hold_reference))
+
+
+
+	synchronicity::lock(.GlobalEnv$.message_processing) #Waiting until server finishes processing the message
+	synchronicity::unlock(.GlobalEnv$.message_processing)
+
+	if (!is.null(hold_reference))
 	{
-		#If user wants us to wait for the completion of the message processing, we wait.
-		synchronicity::lock(.GlobalEnv$.message_processing) #Waiting until server finishes processing the message
-
-		if (!is.null(hold_reference))
-		{
-			rm(hold_reference)
-		}
-
-		if (block)
-		{
-			synchronicity::lock(.GlobalEnv$.shared_mem_guard)
-			ret<-get_object_from_big_matrix(.GlobalEnv$.shared_mem)
-			synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
-		}
+		rm(hold_reference)
+		gc()
 	}
+
+	if (method!='quit')
+	{
+		synchronicity::lock(.GlobalEnv$.shared_mem_guard)
+		ret<-get_object_from_big_matrix(.GlobalEnv$.shared_mem)
+		synchronicity::unlock(.GlobalEnv$.shared_mem_guard)
+	} else {
+		ret<-NULL
+	}
+
+
+	synchronicity::unlock(.GlobalEnv$.client_is_busy)
+
 	return(ret)
 }
 

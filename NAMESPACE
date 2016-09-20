@@ -2,8 +2,10 @@
 
 export(init_client)
 export(init_server)
+export(is_server_initialized)
+export(is_server_running)
 export(reset_communication)
-export(reset_mutexes)
+export(send_to_server)
 export(server_loop)
 export(shutdown_client)
 export(shutdown_server)
