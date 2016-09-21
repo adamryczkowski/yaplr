@@ -27,9 +27,26 @@ is_server_initialized<-function()
 	return(TRUE)
 }
 
+#' @export
 is_client_initialized<-function()
 {
-	return(!is.null(.GlobalEnv$.shared_mem))
+
+	if(is.null(.GlobalEnv$.shared_mem))
+		return (FALSE)
+
+	shared_file<-getOption('shared_file')
+	if (!file.exists(shared_file))
+	{
+		return(FALSE)
+	}
+	if (exists(x='.bm_mtime', envir = .GlobalEnv))
+	{
+		if (file.mtime(shared_file) == .GlobalEnv$.bm_mtime)
+		{
+			return(TRUE)
+		}
+	}
+	return(FALSE)
 }
 
 #' @title Tests if server is processing messages
@@ -82,6 +99,10 @@ is_server_running<-function()
 
 #' @title Puts object in a shared big.matrix
 #'
+#' @param bm big.matrix where the data should go
+#' @param obj obj to store. If it is larger than a buffor, it will be stored in a separate big.matrix
+#' @param payload large object that will not get deserialized unless the method explicitly asks for it.
+#'
 #' @description Returns NULL or big.matrix that stores the actual object in case the object is too big to fit bm.
 #' Be careful to assign the returned value, otherwise you will get segment violation if gc frees the
 #' big.matrix containing the object before it is read.
@@ -90,7 +111,18 @@ put_object_in_big_matrix<-function(bm, obj)
 	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
 	if (!is.null(obj))
 	{
-		rawobj<-serialize(connection=NULL,obj,ascii=FALSE)
+		#This is short path where obj is already a big.matrix.
+		#In such case allocation of big.matrix and serialization is not necessary.
+		#We still return the big.matrix (i.e. obj) for consistency.
+		if (class(obj)=='big.matrix')
+		{
+			raw_descr_bm<-serialize(connection=NULL,bigmemory::describe(obj))
+			bm[(sizeint+1):(sizeint+length(raw_descr_bm)),1]<-raw_descr_bm
+			ans<-obj
+			return(ans)
+		} else {
+			rawobj<-serialize(connection=NULL,obj,ascii=FALSE)
+		}
 	} else{
 		rawobj<-raw(0)
 	}
@@ -116,6 +148,25 @@ put_object_in_big_matrix<-function(bm, obj)
 	}
 }
 
+#' Function that does not deserialize large objects. It returns either an object, or
+#' big.matrix with the unserialized object
+get_object_from_big_matrix_raw<-function(bm)
+{
+	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
+	objsize<-unserialize(connection=bm[1:sizeint,1])
+	if (objsize > 0)
+	{
+		ans<-unserialize(connection=bm[(sizeint+1):(objsize+sizeint),1])
+		if (objsize>nrow(bm)-sizeint)
+		{
+			ans<-bigmemory::attach.big.matrix(ans)
+		}
+		return(ans)
+	} 	else  {
+		return(NULL)
+	}
+}
+
 #' Function returns object
 get_object_from_big_matrix<-function(bm)
 {
@@ -135,5 +186,4 @@ get_object_from_big_matrix<-function(bm)
 	} 	else  {
 		return(NULL)
 	}
-
 }

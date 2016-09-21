@@ -1,13 +1,13 @@
 #This is a main event loop for the server. Each iteration of the loop requires the client to unlock the
 #'server_wakeup' mutex.
-#' @export
-server_loop<-function()
+server_loop<-function(quiet=FALSE)
 {
 	if (!is_server_initialized())
 	{
 		init_server()
 	}
 	exit_flag=FALSE
+	synchronicity::unlock(.GlobalEnv$.server_initializing)
 	while(!exit_flag)
 	{
 
@@ -19,7 +19,7 @@ server_loop<-function()
 		#mutex allows client to wait until we process the message
 		synchronicity::unlock(.GlobalEnv$.idling_server)
 
-		obj<-get_object_from_big_matrix(.GlobalEnv$.shared_mem)
+		obj<-get_object_from_big_matrix_raw(.GlobalEnv$.shared_mem)
 		hold_reference<-NULL
 
 		if (!is.null(obj))
@@ -27,10 +27,12 @@ server_loop<-function()
 			if (obj$method == 'quit')
 			{
 				exit_flag=TRUE
-				cat("Received 'quit' command\n")
+				if (!quiet)
+					cat("Received 'quit' command\n")
 			} else
 			{
-				cat(paste0("Received '", obj$method, "' command\n"))
+				if (!quiet)
+					cat(paste0("Received '", obj$method, "' command\n"))
 
 				ans<-call_function(obj)
 				if (!is.null(ans))

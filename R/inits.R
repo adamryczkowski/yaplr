@@ -7,7 +7,6 @@
 #' client side. Nothing will happen if you don't call it except leaked mutexes.
 #'
 #' @rdname init_client
-#' @export
 init_client<-function(server_ok=FALSE)
 {
 	if (exists(x = '.role', envir = .GlobalEnv))
@@ -32,11 +31,25 @@ init_client<-function(server_ok=FALSE)
 	{
 		stop("Cannot initialize client before initialization of the server.")
 	}
+	shared_file<-getOption('shared_file')
+	if (!file.exists(shared_file))
+	{
+		stop("The shared file is missing. Is server really running?")
+	}
+	if (exists(x='.bm_mtime', envir = .GlobalEnv))
+	{
+		if (file.mtime(shared_file) == .GlobalEnv$.bm_mtime)
+		{
+			return(FALSE)
+		}
+	}
 	.GlobalEnv$buffer_size=4096 #option
-	obj<-readRDS('/tmp/yaplr_file.rds')
+	obj<-readRDS(shared_file)
+	.GlobalEnv$.bm_mtime<-file.mtime(shared_file)
 	.GlobalEnv$.shared_mem<-bigmemory::attach.big.matrix(obj$mem)
 	.GlobalEnv$.server_wakeup<-attach_mutex('server_wakeup')
 	.GlobalEnv$.server_initialized<-attach_mutex('server_initialized')
+	.GlobalEnv$.server_initializing<-attach_mutex('server_initializing')
 	.GlobalEnv$.idling_server<-attach_mutex('idling_server')
 	.GlobalEnv$.message_processing<-attach_mutex('message_processing')
 	.GlobalEnv$.client_is_busy<-attach_mutex('client_is_busy')
@@ -51,7 +64,6 @@ init_client<-function(server_ok=FALSE)
 }
 
 #' @rdname init_client
-#' @export
 shutdown_client<-function(server_ok=FALSE)
 {
 	if (exists(x = '.role', envir = .GlobalEnv))
@@ -90,7 +102,6 @@ shutdown_client<-function(server_ok=FALSE)
 #'
 #' The presence of this function is mostly for debugging purposes. Once the package leaves the
 #' beta stage, it will removed.
-#' @export
 reset_communication<-function()
 {
 	if (exists('.client_is_busy',envir=.GlobalEnv))
@@ -127,7 +138,6 @@ reset_communication<-function()
 #'
 #' When you no longer need the server (after the server exited its message loop), run \code{shutdown_server()}
 
-#' @export
 #' @rdname init_server
 init_server<-function(force=FALSE)
 {
@@ -169,6 +179,7 @@ init_server<-function(force=FALSE)
 		}
 	}
 
+	shared_file<-getOption('shared_file')
 	.GlobalEnv$buffer_size=4096 #option
 	.GlobalEnv$.role='server'
 	.GlobalEnv$.shared_mem <- bigmemory::big.matrix(nrow=.GlobalEnv$buffer_size,ncol=1, type='raw')
@@ -177,8 +188,10 @@ init_server<-function(force=FALSE)
 	.GlobalEnv$.server_wakeup<-synchronicity::boost.mutex('server_wakeup')
 
 	#This mutex is owned by server and freed by server. It is used as a cross-process flag indicating
-	#initialized shared memory
+	#initialized shared memory. .server_initializing works in reverse, i.e. it is actually freed by the server
 	.GlobalEnv$.server_initialized<- synchronicity::boost.mutex('server_initialized')
+	.GlobalEnv$.server_initializing<- synchronicity::boost.mutex('server_initializing')
+	suppressWarnings(synchronicity::lock(.GlobalEnv$.server_initializing, block=FALSE))
 
 	#This mutex is owned by server and freed by server. It is locked when server is idle, and
 	#free when server processes a message. It is used as a cross-process flag indicating whether server
@@ -202,9 +215,10 @@ init_server<-function(force=FALSE)
 	#The mutex ensures that only one client can talk to the server at a time.
 	.GlobalEnv$.client_is_busy<-synchronicity::boost.mutex('client_is_busy')
 
-	.GlobalEnv$.object_starage<-new.env(parent=emptyenv(), hash=TRUE)
+	.GlobalEnv$.object_storage<-new.env(parent=emptyenv(), hash=TRUE)
 
-	saveRDS(list(mem=bigmemory::describe(.GlobalEnv$.shared_mem)), '/tmp/yaplr_file.rds')
+
+	saveRDS(list(mem=bigmemory::describe(.GlobalEnv$.shared_mem)), shared_file)
 	synchronicity::lock(.GlobalEnv$.server_wakeup, block=FALSE)
 	synchronicity::lock(.GlobalEnv$.server_initialized, block=FALSE)
 
@@ -215,7 +229,6 @@ init_server<-function(force=FALSE)
 }
 
 #' @rdname init_server
-#' @export
 shutdown_server<-function()
 {
 	if (exists(x = '.role', envir = .GlobalEnv))
@@ -238,9 +251,10 @@ shutdown_server<-function()
 		suppressWarnings(synchronicity::unlock(m))
 	}
 
-	if (file.exists('/tmp/yaplr_file.rds'))
+	shared_file<-getOption('shared_file')
+	if (file.exists(shared_file))
 	{
-		unlink('/tmp/yaplr_file.rds')
+		unlink(shared_file)
 	}
 
 	if (exists('.server_wakeup',envir=.GlobalEnv))

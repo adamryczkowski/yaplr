@@ -1,7 +1,6 @@
 
 #' Function sends message 'message' to the server, and optionally waits until server finishes processing it.
 #' block implicitely means that we are interested in return value.
-#' @export
 send_to_server<-function(method, args)
 {
 	#First we make sure, that there is only one process trying to communicate with the server
