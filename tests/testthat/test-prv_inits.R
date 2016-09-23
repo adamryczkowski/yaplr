@@ -61,3 +61,30 @@ test_that("Multiple server inits",{
 	mccollect()
 })
 
+test_that("Initialize client on the server",{
+	suppressWarnings(yaplr:::shutdown_client())
+	yaplr:::shutdown_server()
+
+	yaplr:::init_server()
+	expect_false(yaplr:::init_client(server_ok=TRUE))
+
+
+	expect_warning(yaplr:::shutdown_client(), regexp = 'Shutting down client on server does nothing')
+	yaplr:::shutdown_server()
+})
+
+test_that("Initialize client when shared file was removed",{
+	suppressWarnings(yaplr:::shutdown_client())
+	yaplr:::shutdown_server()
+
+	yaplr:::init_server()
+	shared_file<-getOption('yaplr_shared_file')
+	expect_true(file.exists(shared_file))
+	unlink(shared_file)
+
+	expect_error(yaplr:::init_client(),regexp = 'The shared file is missing. Is server really running')
+
+	expect_warning(f<-yaplr:::shutdown_client(),regexp = 'Client was not initialized anyway, no need to shut down')
+	expect_false(f)
+	yaplr:::shutdown_server()
+})

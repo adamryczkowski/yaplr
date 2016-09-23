@@ -15,10 +15,10 @@ NULL
 .onLoad	<-	function(libname,	pkgname)	{
 	op	<-	options()
 	op.yaplr	<-	list(
-		buffer_size	=	4096,
-		automatic_server_start	=	TRUE,
-		default_server_type	=	"rscript",
-		shared_file = '/tmp/yaplr_file.rds' #TODO: Different file on Windows
+		yaplr_buffer_size	=	4096,
+		yaplr_automatic_server_start	=	TRUE,
+		yaplr_default_server_type	=	"rscript",
+		yaplr_shared_file = '/tmp/yaplr_file.rds' #TODO: Different file on Windows
 	)
 	toset	<-	!(names(op.yaplr)	%in%	names(op))
 	if(any(toset))	options(op.yaplr[toset])
@@ -35,7 +35,7 @@ make_sure_server_is_started<-function(server_type=NULL, quiet=FALSE)
 {
 	if (is.null(server_type))
 	{
-		server_type=getOption('default_server_type')
+		server_type=getOption('yaplr_default_server_type')
 	}
 	if (!server_type %in% c('fork','rscript', 'null'))
 	{
@@ -98,6 +98,44 @@ make_sure_server_is_down<-function()
 	return(FALSE)
 }
 
+#' @title Makes sure client-server system is initialized
+#' @description If server is off, it first automatically starts it (if \code{automatic_server_start=TRUE},
+#' otherwise throws an error), then makes sure this session is connected to it. Optionally checks connectivity
+#' with ping
+auto_init<-function(automatic_server_start=NULL, check_server_with_ping=TRUE, server_type=NULL)
+{
+	if (is.null(automatic_server_start))
+	{
+		automatic_server_start<-getOption('yaplr_automatic_server_start')
+	}
+	if (!is_server_initialized())
+	{
+		if (automatic_server_start)
+		{
+			make_sure_server_is_started(server_type=server_type)
+		} else {
+			stop("No server is available. Start server with 'make_sure_server_is_started' first.")
+		}
+	}
+
+	if (!is_client_initialized())
+		init_client(server_ok=FALSE)
+
+	if (check_server_with_ping)
+	{
+		if (!ping_server(quiet=TRUE))
+		{
+			stop("Server is not responding to pings")
+		}
+	} else{
+		if (!is_server_running())
+		{
+			stop("Server does not seem to be running the message queue")
+		}
+	}
+
+	return(invisible(NULL))
+}
 
 #' @title Pings the server. The ultimate way to check whether server is running
 #' @description Pulls and pushes back a replay of a 'ping' command. If there are problems reaching the server
@@ -105,17 +143,7 @@ make_sure_server_is_down<-function()
 #' @export
 ping_server<-function(quiet=FALSE)
 {
-	if (!is_server_initialized())
-	{
-		if (!quiet)
-			warning("Server not initialized.")
-		return(FALSE)
-	}
-
-	if (!is_client_initialized())
-	{
-		init_client(server_ok = FALSE)
-	}
+	auto_init(automatic_server_start = FALSE, check_server_with_ping = FALSE)
 
 	if (!is_server_running())
 	{
@@ -154,35 +182,7 @@ ping_server<-function(quiet=FALSE)
 #' @rdname object_management
 send_object<-function(obj, tag, automatic_server_start=NULL, check_server_with_ping=TRUE, force_unserialize_on_server=FALSE)
 {
-	if (is.null(automatic_server_start))
-	{
-		automatic_server_start<-getOption('automatic_server_start')
-	}
-	if (!is_server_initialized())
-	{
-		if (automatic_server_start)
-		{
-			make_sure_server_is_started()
-		} else {
-			stop("No server is available. Start server with 'make_sure_server_is_started' first.")
-		}
-	} else {
-		if (check_server_with_ping)
-		{
-			if (!ping_server(quiet=TRUE))
-			{
-				stop("Server is not responding to pings")
-			}
-		} else{
-			if (!is_server_running())
-			{
-				stop("Server does not seem to be running the message queue")
-			}
-		}
-	}
-
-	if (!is_client_initialized())
-		init_client(server_ok=FALSE)
+	auto_init(automatic_server_start = automatic_server_start, check_server_with_ping = check_server_with_ping)
 
 	if (!force_unserialize_on_server)
 	{
@@ -205,35 +205,7 @@ send_object<-function(obj, tag, automatic_server_start=NULL, check_server_with_p
 #' @rdname object_management
 retreive_object<-function(tag, automatic_server_start=NULL, check_server_with_ping=TRUE)
 {
-	if (is.null(automatic_server_start))
-	{
-		automatic_server_start<-getOption('automatic_server_start')
-	}
-	if (!is_server_initialized())
-	{
-		if (automatic_server_start)
-		{
-			make_sure_server_is_started()
-		} else {
-			stop("No server is available. Start server with 'make_sure_server_is_started' first.")
-		}
-	} else {
-		if (check_server_with_ping)
-		{
-			if (!ping_server(quiet=TRUE))
-			{
-				stop("Server is not responding to pings")
-			}
-		} else{
-			if (!is_server_running())
-			{
-				stop("Server does not seem to be running the message queue")
-			}
-		}
-	}
-
-	if (!is_client_initialized())
-		init_client(server_ok=FALSE)
+	auto_init(automatic_server_start = automatic_server_start, check_server_with_ping = check_server_with_ping)
 
 	ans<-send_to_server('retrieve_object', list(tag=tag))
 	if (class(ans)=="big.matrix.descriptor")
@@ -248,35 +220,7 @@ retreive_object<-function(tag, automatic_server_start=NULL, check_server_with_pi
 #' @rdname object_management
 remove_object<-function(tag, automatic_server_start=NULL, check_server_with_ping=TRUE)
 {
-	if (is.null(automatic_server_start))
-	{
-		automatic_server_start<-getOption('automatic_server_start')
-	}
-	if (!is_server_initialized())
-	{
-		if (automatic_server_start)
-		{
-			make_sure_server_is_started()
-		} else {
-			stop("No server is available. Start server with 'make_sure_server_is_started' first.")
-		}
-	} else {
-		if (check_server_with_ping)
-		{
-			if (!ping_server(quiet=TRUE))
-			{
-				stop("Server is not responding to pings")
-			}
-		} else{
-			if (!is_server_running())
-			{
-				stop("Server does not seem to be running the message queue")
-			}
-		}
-	}
-
-	if (!is_client_initialized())
-		init_client(server_ok=FALSE)
+	auto_init(automatic_server_start = automatic_server_start, check_server_with_ping = check_server_with_ping)
 
 	send_to_server('remove_object', list(tag=tag))
 	return(invisible(NULL))
@@ -286,36 +230,16 @@ remove_object<-function(tag, automatic_server_start=NULL, check_server_with_ping
 #' @rdname object_management
 does_object_exist<-function(tag, automatic_server_start=NULL, check_server_with_ping=TRUE)
 {
-	if (is.null(automatic_server_start))
-	{
-		automatic_server_start<-getOption('automatic_server_start')
-	}
-	if (!is_server_initialized())
-	{
-		if (automatic_server_start)
-		{
-			make_sure_server_is_started()
-		} else {
-			stop("No server is available. Start server with 'make_sure_server_is_started' first.")
-		}
-	} else {
-		if (check_server_with_ping)
-		{
-			if (!ping_server(quiet=TRUE))
-			{
-				stop("Server is not responding to pings")
-			}
-		} else{
-			if (!is_server_running())
-			{
-				stop("Server does not seem to be running the message queue")
-			}
-		}
-	}
-
-	if (!is_client_initialized())
-		init_client(server_ok=FALSE)
+	auto_init(automatic_server_start = automatic_server_start, check_server_with_ping = check_server_with_ping)
 
 	ans<-send_to_server('does_object_exist', list(tag=tag))
+	return(ans)
+}
+
+list_objects<-function(automatic_server_start=NULL, check_server_with_ping=TRUE)
+{
+	auto_init(automatic_server_start = automatic_server_start, check_server_with_ping = check_server_with_ping)
+
+	ans<-send_to_server(method='list_object', args=list())
 	return(ans)
 }

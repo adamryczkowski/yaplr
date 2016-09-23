@@ -19,7 +19,7 @@ server_loop<-function(quiet=FALSE)
 		#mutex allows client to wait until we process the message
 		synchronicity::unlock(.GlobalEnv$.idling_server)
 
-		obj<-get_object_from_big_matrix_raw(.GlobalEnv$.shared_mem)
+		obj<-get_object_from_big_matrix(.GlobalEnv$.shared_mem)
 		hold_reference<-NULL
 
 		if (!is.null(obj))

@@ -11,7 +11,7 @@ test_that("Test is_server_running", {
 	{
 		library(yaplr)
 		yaplr:::init_server()
-		yaplr:::server_loop()
+		yaplr:::server_loop(quiet = TRUE)
 		yaplr:::shutdown_server()
 	}
 	con<-mcparallel(fn())
@@ -41,10 +41,10 @@ test_that("Test ping-pong, server side", {
 	yaplr:::shutdown_server()
 	yaplr:::reset_communication()
 	con<-mcparallel(clientfn())
-#	init_server(force=TRUE)
+	init_server()
 
 #	debugonce(server_loop)
-	yaplr:::server_loop()
+	yaplr:::server_loop(quiet = TRUE)
 
 	mccollect(con)
 	yaplr:::shutdown_server()
@@ -55,7 +55,7 @@ test_that("Test ping-pong, client side", {
 	{
 		library(yaplr)
 		yaplr:::init_server()
-		yaplr:::server_loop()
+		yaplr:::server_loop(quiet = TRUE)
 		yaplr:::shutdown_server()
 	}
 

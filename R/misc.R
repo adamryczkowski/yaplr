@@ -34,7 +34,7 @@ is_client_initialized<-function()
 	if(is.null(.GlobalEnv$.shared_mem))
 		return (FALSE)
 
-	shared_file<-getOption('shared_file')
+	shared_file<-getOption('yaplr_shared_file')
 	if (!file.exists(shared_file))
 	{
 		return(FALSE)
@@ -66,19 +66,9 @@ is_server_running<-function()
 
 	#First we wait until the server is not busy
 
-	if (exists(x = '.message_processing', envir = .GlobalEnv))
-	{
-		mutex_message_processing<-.GlobalEnv$.message_processing
-	} else {
-		mutex_message_processing<-attach_mutex('message_processing')
-	}
+	mutex_message_processing<-attach_mutex('message_processing')
 
-	if (exists(x='.idling_server', envir=.GlobalEnv))
-	{
-		mutex_idling_server<-.GlobalEnv$.idling_server
-	} else {
-		mutex_idling_server<-attach_mutex('idling_server')
-	}
+	mutex_idling_server<-attach_mutex('idling_server')
 
 	synchronicity::lock(mutex_message_processing) #We wait for the mutex without actually owning it.
 	#Now we check idling state
@@ -126,20 +116,21 @@ put_object_in_big_matrix<-function(bm, obj)
 	} else{
 		rawobj<-raw(0)
 	}
-	len<-serialize(connection=NULL,length(rawobj))
-	if (length(len)!=sizeint)
+	rawlen<-serialize(connection=NULL,length(rawobj))
+	if (length(rawlen)!=sizeint)
 	{
 		stop("Inconsistent size of integer!")
 	}
-	bm[1:sizeint,1]<-as.raw(len)
 	if (length(rawobj)>nrow(bm)-sizeint)
 	{
-		extrabm<-bigmemory::big.matrix(nrow=length(obj),ncol=1, type='raw')
+		extrabm<-bigmemory::big.matrix(nrow=length(rawobj),ncol=1, type='raw')
 		extrabm[,1]<-rawobj
 		rawbm<-serialize(connection=NULL,bigmemory::describe(extrabm))
+		bm[1:sizeint,1]<-serialize(connection=NULL,length(rawbm),ascii=FALSE)
 		bm[(sizeint+1):(sizeint+length(rawbm)),1]<-rawbm
 		ans<-extrabm
 	} else {
+		bm[1:sizeint,1]<-rawlen
 		if (length(rawobj)>0)
 		{
 			bm[(sizeint+1):(sizeint+length(rawobj)),1]<-rawobj
@@ -149,7 +140,10 @@ put_object_in_big_matrix<-function(bm, obj)
 }
 
 #' Function that does not deserialize large objects. It returns either an object, or
-#' big.matrix with the unserialized object
+#' a (nested) big.matrix with the unserialized object
+
+#' Function returns object stored in bm after full unserialization. After the call,
+#' any nested big.matrices can be destroyed
 get_object_from_big_matrix_raw<-function(bm)
 {
 	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
@@ -157,7 +151,7 @@ get_object_from_big_matrix_raw<-function(bm)
 	if (objsize > 0)
 	{
 		ans<-unserialize(connection=bm[(sizeint+1):(objsize+sizeint),1])
-		if (objsize>nrow(bm)-sizeint)
+		if (class(ans)=='big.matrix.descriptor')
 		{
 			ans<-bigmemory::attach.big.matrix(ans)
 		}
@@ -167,23 +161,15 @@ get_object_from_big_matrix_raw<-function(bm)
 	}
 }
 
-#' Function returns object
+#' Function returns object stored in bm after full unserialization. After the call,
+#' any nested big.matrices can be destroyed
 get_object_from_big_matrix<-function(bm)
 {
-	sizeint<-length(serialize(connection=NULL,as.integer(-10)))
-	objsize<-unserialize(connection=bm[1:sizeint,1])
-	if (objsize > 0)
+	ans<-get_object_from_big_matrix_raw(bm)
+	if (class(ans)=='big.matrix')
 	{
-		ans<-unserialize(connection=bm[(sizeint+1):(objsize+sizeint),1])
-		if (objsize>nrow(bm)-sizeint)
-		{
-			extra_bm<-bigmemory::attach.big.matrix(ans)
-			ans<-unserialize(connection=extra_bm)
-			rm(extra_bm)
-			gc()
-		}
-		return(ans)
-	} 	else  {
-		return(NULL)
+		ans<-unserialize(connection=ans[,1])
+		gc()
 	}
+	return(ans)
 }

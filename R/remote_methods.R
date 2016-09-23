@@ -38,9 +38,14 @@ remotecall_does_object_exist<-function(tag)
 	return(exists(tag, envir = .GlobalEnv$.object_starage))
 }
 
-remotecall_ping<-function()
+remotecall_ping<-function(noop=NULL)
 {
-	return('pong')
+	if (is.null(noop))
+	{
+		return('pong')
+	} else {
+		return(object.size(noop))
+	}
 }
 
 remotecall_list_objects<-function()
