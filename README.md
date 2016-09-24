@@ -3,7 +3,7 @@
 This package significantly lowers the difficulty for efficient sending R objects between different R sessions on the same machine. 
 
 Objects are shared via an intermediary server R process, that is lazily spawned, and listens for user requests. 
-All communication is done via shared memory (package bigmemeory) and mutexes (package synchronicity).
+All communication is done via shared memory (package bigmemory) and mutexes (package synchronicity).
 
 The whole process is designed with efficiency in mind, for both small and large objects. 
 
@@ -29,7 +29,7 @@ remove_object('myobject')
 quit_server()
 ```
 
-Each session is treated equaly. There can be as many sessions as you would like. 
+Each session is treated equal. There can be as many sessions as you would like. 
 You can even access the objects after the session that originated the object has ended. 
 To free up the memory taken by single variable use `remove_object`. 
 
@@ -40,10 +40,10 @@ To free up the memory taken by single variable use `remove_object`.
 Server is implemented in R. It uses very little memory in itself - 6 mutexes, pointer to the `big.matrix` and an environment for stored objects. 
 Each object is stored as a unserialized `bigmemory::big.matrix` of type `'raw'` together with single metadata `ctime` - creation time.
 
-Since the server is spawned in separate process, the amount of memory it occuppies is not reported to other R sessions. 
-Similarily, the memory taken by the stored objects is not visible to R. 
+Since the server is spawned in separate process, the amount of memory it occupies is not reported to other R sessions. 
+Similarly, the memory taken by the stored objects is not visible to R. 
 
-Because the variables are internally stored as shared memeory, 
+Because the variables are internally stored as shared memory, 
 it is visible in `htop` as "shared" memory (as opposed to "used" memory), which might be confusing for some people. 
 
 ## Troubleshooting
