@@ -59,3 +59,4 @@ See the GitHub's Issues tab to see all unresolved issues.
 
 You can post feature requests there as well, and hopefully I will have resources to address them all.
 
+The package was developed and tested on Ubuntu Linux 14.04 64bit. If you encounter any problems running the package on your platfrom, please let me know. 
