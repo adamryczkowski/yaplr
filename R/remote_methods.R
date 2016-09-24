@@ -50,6 +50,11 @@ remotecall_ping<-function(noop=NULL)
 
 remotecall_list_objects<-function()
 {
+	if (length(.GlobalEnv$.object_storage)==0)
+	{
+		return(data.frame(size=numeric(), ctime=character()))
+	}
+
 	sizes<-sapply(paste0('.GlobalEnv$.object_storage$', ls(name=.GlobalEnv$.object_storage)),
 								function(o)
 									length(eval(parse(text=o))$obj)
