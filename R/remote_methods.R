@@ -16,7 +16,7 @@ remotecall_store_object<-function(obj, tag)
 #' It returns a big.matrix containing the object, or NULL if no object is found
 remotecall_retrieve_object<-function(tag)
 {
-	obj<-.GlobalEnv$.object_starage[tag]$obj
+	obj<-.GlobalEnv$.object_storage[[tag]]$obj
 	if (class(obj)=='big.matrix')
 	{
 		obj<-bigmemory::describe(obj)
@@ -27,15 +27,15 @@ remotecall_retrieve_object<-function(tag)
 
 remotecall_remove_object<-function(tag)
 {
-	if(exists(tag, envir = .GlobalEnv$.object_starage))
+	if(exists(tag, envir = .GlobalEnv$.object_storage))
 	{
-		rm(list = tag, envir = .GlobalEnv$.object_starage)
+		rm(list = tag, envir = .GlobalEnv$.object_storage)
 	}
 }
 
 remotecall_does_object_exist<-function(tag)
 {
-	return(exists(tag, envir = .GlobalEnv$.object_starage))
+	return(exists(tag, envir = .GlobalEnv$.object_storage))
 }
 
 remotecall_ping<-function(noop=NULL)
@@ -50,14 +50,14 @@ remotecall_ping<-function(noop=NULL)
 
 remotecall_list_objects<-function()
 {
-	sizes<-sapply(paste0('.GlobalEnv$.object_starage$', ls(name=.GlobalEnv$.object_starage)),
+	sizes<-sapply(paste0('.GlobalEnv$.object_storage$', ls(name=.GlobalEnv$.object_storage)),
 								function(o)
-									object.size(eval(parse(text=o$obj)))
+									length(eval(parse(text=o))$obj)
 								)
-	names<-ls(name=.GlobalEnv$.object_starage)
-	dates<-sapply(paste0('.GlobalEnv$.object_starage$', ls(name=.GlobalEnv$.object_starage)),
-								function(o) eval(parse(text=o$obj))$date)
-	ans<-cbind(sizes, dates)
+	names<-ls(name=.GlobalEnv$.object_storage)
+	dates<-sapply(paste0('.GlobalEnv$.object_storage$', ls(name=.GlobalEnv$.object_storage)),
+								function(o) eval(parse(text=o))$date)
+	ans<-data.frame(size=sizes, ctime=dates)
 	rownames(ans)<-names
 	colnames(ans)<-c('size','ctime')
 	return(ans)

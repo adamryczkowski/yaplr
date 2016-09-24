@@ -203,7 +203,7 @@ send_object<-function(obj, tag, automatic_server_start=NULL, check_server_with_p
 
 #' @export
 #' @rdname object_management
-retreive_object<-function(tag, automatic_server_start=NULL, check_server_with_ping=TRUE)
+retrieve_object<-function(tag, automatic_server_start=NULL, check_server_with_ping=TRUE)
 {
 	auto_init(automatic_server_start = automatic_server_start, check_server_with_ping = check_server_with_ping)
 
@@ -236,10 +236,23 @@ does_object_exist<-function(tag, automatic_server_start=NULL, check_server_with_
 	return(ans)
 }
 
+#' @export
+#' @rdname object_management
 list_objects<-function(automatic_server_start=NULL, check_server_with_ping=TRUE)
 {
 	auto_init(automatic_server_start = automatic_server_start, check_server_with_ping = check_server_with_ping)
 
-	ans<-send_to_server(method='list_object', args=list())
+	ans<-send_to_server(method='list_objects', args=list())
 	return(ans)
+}
+
+#' @export
+quit_server<-function(check_server_with_ping=TRUE)
+{
+	if (is_server_running())
+	{
+		send_to_server(method='quit', args=NULL)
+		return(TRUE)
+	}
+	return(FALSE)
 }

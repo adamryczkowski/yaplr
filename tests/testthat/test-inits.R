@@ -28,5 +28,6 @@ test_that("Server start and stop", {
 	expect_true(ans)
 	ans<-make_sure_server_is_down()
 	expect_false(ans)
+	invisible(NULL)
 })
 

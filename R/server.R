@@ -7,11 +7,11 @@ server_loop<-function(quiet=FALSE)
 		init_server()
 	}
 	exit_flag=FALSE
+	synchronicity::lock(.GlobalEnv$.idling_server)
 	synchronicity::unlock(.GlobalEnv$.server_initializing)
 	while(!exit_flag)
 	{
 
-		synchronicity::lock(.GlobalEnv$.idling_server)
 		synchronicity::lock(.GlobalEnv$.server_wakeup)
 		#Since we are woken up, we know there is a message waiting for us and there is at least one client that
 		#waits until we process this message
@@ -50,16 +50,13 @@ server_loop<-function(quiet=FALSE)
 		}
 
 
-		if (!is.null(hold_reference))
-		{
-			#Waiting until client finishes processing the request
-			synchronicity::lock(.GlobalEnv$.client_is_busy)
-			synchronicity::unlock(.GlobalEnv$.client_is_busy)
-		}
-
+		synchronicity::lock(.GlobalEnv$.idling_server) #Now we start idling
 		synchronicity::unlock(.GlobalEnv$.message_processing) #Signaling end of message processing
 		#cat('Server has received a message!\n')
 	}
+	synchronicity::unlock(.GlobalEnv$.idling_server) #No server means no idling
+	synchronicity::lock(.GlobalEnv$.client_is_busy) #Waiting for all clients to finish processing
+	invisible(NULL)
 }
 
 call_function<-function(obj)
