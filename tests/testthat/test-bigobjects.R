@@ -25,7 +25,7 @@ test_that("Sending and receivinig big object, server side",{
 	}
 	yaplr:::shutdown_server()
 	yaplr:::reset_communication()
-	con<-mcparallel(clientfn())
+	con<-parallel::mcparallel(clientfn())
 
 	synchronicity::unlock(m1) #Allow client to send messages in 200ms.
 

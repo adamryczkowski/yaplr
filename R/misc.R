@@ -2,7 +2,7 @@
 attach_mutex<-function(name, timeout=NULL)
 {
 	library(synchronicity)
-	ans<-new('boost.mutex.descriptor')
+	ans<-methods::new('boost.mutex.descriptor')
 	ans@description<-list(shared.name=name, timeout=timeout)
 	m<-synchronicity::attach.mutex(ans)
 	suppressWarnings({
@@ -169,7 +169,6 @@ get_object_from_big_matrix<-function(bm)
 	if (class(ans)=='big.matrix')
 	{
 		ans<-unserialize(connection=ans[,1])
-		gc()
 	}
 	return(ans)
 }
